@@ -1,11 +1,16 @@
 ﻿using System.Diagnostics;
-using System.Text;
 using System.Text.Json;
 
 namespace DiskSentinel;
 
+public sealed record SmartAttribute(string Id, string Name, string Value, string Worst, string Threshold, string Raw, bool Failed);
+
+public sealed record Problem(string Kind, string Message);
+
 public sealed class DiskInfo
 {
+    public const string Deg = "\u00B0C";
+
     public string Name { get; set; } = "";
     public string Serial { get; set; } = "";
     public string Device { get; set; } = "";
@@ -22,17 +27,39 @@ public sealed class DiskInfo
     public long? PowerCycles { get; set; }
     public long? UnsafeShutdowns { get; set; }
 
-    public int? Health { get; private set; }
-    public List<string> Reasons { get; } = new();
+    public List<(string Key, string Value)> Info { get; } = new();
+    public List<SmartAttribute> Attributes { get; } = new();
 
-    /// <summary>Computes the 0-100 health score and the reasons behind it.</summary>
+    /// <summary>0-100 health score (null when the drive could not be read).</summary>
+    public int? Health { get; private set; }
+
+    /// <summary>Informational notes shown next to the health score.</summary>
+    public List<string> Notes { get; } = new();
+
+    /// <summary>Things that need the user's attention (these raise alerts).</summary>
+    public List<Problem> Problems { get; } = new();
+
+    /// <summary>Estimated days of life left, extrapolating the average wear rate so far.</summary>
+    public double? RemainingDays
+    {
+        get
+        {
+            if (PowerOnHours is not > 0 || LifeLeft is not int left) return null;
+            if (left <= 0) return 0;
+            double used = 100 - left;
+            if (used <= 0) return null; // no measurable wear yet
+            return PowerOnHours.Value / 24.0 * left / used;
+        }
+    }
+
     public void Evaluate()
     {
-        Reasons.Clear();
+        Notes.Clear();
+        Problems.Clear();
         if (PowerOnHours is null && Temp is null)
         {
             Health = null;
-            Reasons.Add("S.M.A.R.T. data could not be read for this drive.");
+            Notes.Add("S.M.A.R.T. data could not be read for this drive.");
             return;
         }
 
@@ -40,75 +67,101 @@ public sealed class DiskInfo
         if (LifeLeft is int left)
         {
             h = Math.Min(h, left);
-            Reasons.Add($"Wear: {100 - left}% of rated life used");
+            Notes.Add($"Wear: {100 - left}% of the drive's rated life has been used.");
         }
         if (SmartPassed == false)
         {
             h = Math.Min(h, 10);
-            Reasons.Add("S.M.A.R.T. overall self-assessment FAILED");
+            Problems.Add(new("smart", "The drive failed its S.M.A.R.T. self-assessment. Back up your data now."));
         }
-        long bad = (Reallocated ?? 0) + (Pending ?? 0);
-        if (bad > 0)
+        if (Reallocated is > 0)
         {
-            h -= (int)Math.Min(30, bad);
-            Reasons.Add($"{Reallocated ?? 0} reallocated / {Pending ?? 0} pending sectors");
+            h -= (int)Math.Min(30, Reallocated.Value);
+            Notes.Add($"{Reallocated} reallocated sectors.");
+        }
+        if (Pending is > 0)
+        {
+            h -= (int)Math.Min(30, Pending.Value);
+            Problems.Add(new("pending", $"{Pending} sectors are pending reallocation (possible failing surface)."));
         }
         if (MediaErrors is > 0)
         {
             h -= (int)Math.Min(30, MediaErrors.Value);
-            Reasons.Add($"{MediaErrors} media errors");
+            Problems.Add(new("media", $"{MediaErrors} media/data integrity errors were logged."));
         }
         if (Spare is < 20)
         {
             h = Math.Min(h, 40);
-            Reasons.Add($"Available spare only {Spare}%");
+            Problems.Add(new("spare", $"Available spare capacity is down to {Spare}%."));
         }
         if (Temp >= Settings.TempCritical)
-        {
-            h -= 15;
-            Reasons.Add($"Temperature {Temp}Â°C is critical");
-        }
+            Problems.Add(new("temp", $"Temperature is {Temp}{Deg}. Check cooling."));
+        if (RemainingDays is double days && days < Settings.RemainingLifeWarningDays)
+            Problems.Add(new("life", $"Estimated remaining life is {FormatSpan(days)}. Back up your data and plan to replace this drive."));
+
         Health = Math.Max(0, h);
     }
 
-    public string Verdict => Health switch
+    public string Verdict
     {
-        null => "Unknown",
-        >= 70 => "Good",
-        >= Settings.HealthWarning => "Fair - keep an eye on it",
-        _ => "Poor - back up your data",
-    };
-
-    public string EstimatedLifeLeft()
-    {
-        if (PowerOnHours is not > 0 || LifeLeft is not (> 0 and < 100)) return "n/a";
-        double used = 100 - LifeLeft.Value;
-        double days = PowerOnHours.Value / 24.0 * LifeLeft.Value / used;
-        return $"~{days:N0} days at the average wear rate so far";
+        get
+        {
+            if (Health is null) return "Unknown";
+            if (Problems.Count > 0) return "Attention needed";
+            return Health >= 70 ? "Good" : "Good - ageing, no action needed yet";
+        }
     }
+
+    public string StatusText
+    {
+        get
+        {
+            var lines = new List<string>();
+            if (Health is null) { lines.AddRange(Notes); return string.Join("\n", lines); }
+            lines.Add(Problems.Count == 0
+                ? $"The status of the disk is {(Health >= 70 ? "good" : "acceptable")}. No backup or replacement is needed yet."
+                : "Attention needed:");
+            lines.AddRange(Problems.Select(p => "- " + p.Message));
+            lines.AddRange(Notes);
+            return string.Join("\n", lines);
+        }
+    }
+
+    public static string FormatSpan(double days)
+    {
+        int total = (int)Math.Round(days);
+        int years = total / 365;
+        int months = total % 365 / 30;
+        int d = total % 365 % 30;
+        var parts = new List<string>();
+        if (years > 0) parts.Add($"{years} year{(years == 1 ? "" : "s")}");
+        if (months > 0) parts.Add($"{months} month{(months == 1 ? "" : "s")}");
+        if (d > 0 || parts.Count == 0) parts.Add($"{d} day{(d == 1 ? "" : "s")}");
+        return string.Join(", ", parts);
+    }
+
+    public string RemainingText => RemainingDays is double d
+        ? FormatSpan(d)
+        : LifeLeft == 100 ? "No measurable wear yet" : "n/a";
+
+    public string PowerOnText => PowerOnHours is long p ? $"{p / 24:N0} days, {p % 24} hours" : "n/a";
 
     public string ToolTip()
     {
-        string t = Temp is int c ? $"{c}Â°C" : "n/a";
+        string t = Temp is int c ? $"{c}{Deg}" : "n/a";
         string h = Health is int v ? $"{v}%" : "n/a";
-        string s = $"{Name}\nTemp {t} Â· Health {h}";
+        string s = $"{Name}\nTemp {t} \u00B7 Health {h}";
         return s.Length > 127 ? s[..127] : s;
     }
 
-    public string DetailText()
-    {
-        var sb = new StringBuilder();
-        sb.AppendLine($"{Name}  ({(SizeBytes is long b ? $"{b / 1e9:N0} GB" : "?")})");
-        sb.AppendLine($"Health        : {(Health is int h ? $"{h}%" : "n/a")}  - {Verdict}");
-        foreach (var r in Reasons) sb.AppendLine($"                {r}");
-        sb.AppendLine($"Temperature   : {(Temp is int t ? $"{t} Â°C" : "n/a")}");
-        sb.AppendLine($"Power-on time : {(PowerOnHours is long p ? $"{p / 24:N0} days, {p % 24} hours" : "n/a")}");
-        sb.AppendLine($"Lifetime writes: {(WrittenBytes is double w ? $"{w / 1e12:N2} TB" : "n/a")}");
-        sb.AppendLine($"Power cycles  : {PowerCycles?.ToString() ?? "n/a"}   (unsafe shutdowns: {UnsafeShutdowns?.ToString() ?? "n/a"})");
-        sb.AppendLine($"Est. life left: {EstimatedLifeLeft()}");
-        sb.AppendLine($"Serial        : {Serial}");
-        return sb.ToString();
-    }
+    public string DetailText() =>
+        $"{Name}  ({(SizeBytes is long b ? $"{b / 1e9:N0} GB" : "?")})\n" +
+        $"Health        : {(Health is int h ? $"{h}%" : "n/a")} - {Verdict}\n" +
+        $"Temperature   : {(Temp is int t ? $"{t} {Deg}" : "n/a")}\n" +
+        $"Power-on time : {PowerOnText}\n" +
+        $"Remaining life: {RemainingText}\n" +
+        $"Lifetime writes: {(WrittenBytes is double w ? $"{w / 1e12:N2} TB" : "n/a")}\n" +
+        $"Serial        : {Serial}\n";
 }
 
 /// <summary>Reads drive data through smartctl (smartmontools) and its JSON output.</summary>
@@ -122,7 +175,7 @@ public static class SmartService
     {
         var candidates = new List<string>();
         foreach (var dir in (Environment.GetEnvironmentVariable("PATH") ?? "").Split(';', StringSplitOptions.RemoveEmptyEntries))
-            candidates.Add(Path.Combine(dir.Trim(), "smartctl.exe"));
+            candidates.Add(System.IO.Path.Combine(dir.Trim(), "smartctl.exe"));
         candidates.Add(@"C:\Program Files\smartmontools\bin\smartctl.exe");
         candidates.Add(@"C:\Program Files (x86)\smartmontools\bin\smartctl.exe");
         return candidates.FirstOrDefault(File.Exists);
@@ -189,6 +242,25 @@ public static class SmartService
                 ? p.GetBoolean() : null,
         };
 
+        // ---- Information tab ----
+        void Info(string key, string? value) { if (!string.IsNullOrEmpty(value)) d.Info.Add((key, value)); }
+        Info("Model", d.Name);
+        Info("Serial number", d.Serial);
+        Info("Firmware", Str(j, "firmware_version"));
+        if (d.SizeBytes is long cap) Info("Capacity", $"{cap / 1e9:N1} GB ({cap:N0} bytes)");
+        Info("Interface", Str(At(j, "device") ?? default, "protocol"));
+        Info("Device path", device);
+        if (j.TryGetProperty("rotation_rate", out var rr) && rr.ValueKind == JsonValueKind.Number)
+            Info("Type", rr.GetInt32() == 0 ? "Solid state drive" : $"Hard disk, {rr.GetInt32()} rpm");
+        else if (j.TryGetProperty("nvme_version", out _)) Info("Type", "NVMe solid state drive");
+        Info("Form factor", Str(At(j, "form_factor") ?? default, "name"));
+        Info("SATA version", Str(At(j, "sata_version") ?? default, "string"));
+        Info("NVMe version", Str(At(j, "nvme_version") ?? default, "string"));
+        Info("Link speed", Str(At(j, "interface_speed", "current") ?? default, "string"));
+        if (At(j, "trim", "supported") is { ValueKind: JsonValueKind.True or JsonValueKind.False } trim)
+            Info("TRIM supported", trim.GetBoolean() ? "Yes" : "No");
+        if (Num(At(j, "logical_block_size")) is long lbs) Info("Logical block size", $"{lbs} bytes");
+
         if (j.TryGetProperty("nvme_smart_health_information_log", out var nv))
         {
             if (Num(At(nv, "percentage_used")) is long used) d.LifeLeft = (int)Math.Clamp(100 - used, 0, 100);
@@ -197,12 +269,26 @@ public static class SmartService
             d.MediaErrors = Num(At(nv, "media_errors"));
             d.PowerCycles = Num(At(nv, "power_cycles"));
             d.UnsafeShutdowns = Num(At(nv, "unsafe_shutdowns"));
+
+            foreach (var prop in nv.EnumerateObject())
+            {
+                if (prop.Value.ValueKind != JsonValueKind.Number) continue;
+                string nice = char.ToUpper(prop.Name[0]) + prop.Name[1..].Replace('_', ' ');
+                d.Attributes.Add(new SmartAttribute("", nice, "", "", "", prop.Value.GetRawText(), false));
+            }
         }
         else if (At(j, "ata_smart_attributes", "table") is { ValueKind: JsonValueKind.Array } table)
         {
             var attrs = new Dictionary<int, JsonElement>();
             foreach (var a in table.EnumerateArray())
+            {
                 if (Num(At(a, "id")) is long id) attrs[(int)id] = a;
+                long value = Num(At(a, "value")) ?? 0, thresh = Num(At(a, "thresh")) ?? 0;
+                d.Attributes.Add(new SmartAttribute(
+                    $"{Num(At(a, "id"))}", Str(a, "name")?.Replace('_', ' ') ?? "",
+                    $"{value}", $"{Num(At(a, "worst"))}", $"{thresh}",
+                    Str(At(a, "raw") ?? default, "string") ?? "", thresh > 0 && value <= thresh));
+            }
 
             // Vendor "life remaining" style attributes (normalized value counts down from 100).
             foreach (int id in new[] { 202, 231, 233, 177 })
@@ -235,6 +321,6 @@ public static class SmartService
         e is { ValueKind: JsonValueKind.Number } n && n.TryGetInt64(out long v) ? v : null;
 
     static string? Str(JsonElement e, string name) =>
-        e.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String ? v.GetString() : null;
+        e.ValueKind == JsonValueKind.Object && e.TryGetProperty(name, out var v) && v.ValueKind == JsonValueKind.String
+            ? v.GetString() : null;
 }
-

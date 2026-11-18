@@ -15,7 +15,8 @@ on every login (reading SATA drives needs administrator rights).
 #>
 param(
     [switch]$RemoveHardDiskSentinel,
-    [string]$LogPath
+    [string]$LogPath,
+    [string]$ScreenshotDir   # dev option: save a PNG of each window tab after installing
 )
 
 $ErrorActionPreference = 'Stop'
@@ -29,6 +30,7 @@ if (-not (Test-Admin)) {
     $argList = @('-NoProfile', '-ExecutionPolicy', 'Bypass', '-File', "`"$PSCommandPath`"")
     if ($RemoveHardDiskSentinel) { $argList += '-RemoveHardDiskSentinel' }
     if ($LogPath) { $argList += @('-LogPath', "`"$LogPath`"") }
+    if ($ScreenshotDir) { $argList += @('-ScreenshotDir', "`"$ScreenshotDir`"") }
     Start-Process powershell -Verb RunAs -ArgumentList $argList -Wait
     exit
 }
@@ -71,6 +73,18 @@ try {
         -ExecutionTimeLimit ([TimeSpan]::Zero) -StartWhenAvailable
     Register-ScheduledTask -TaskName 'DiskSentinel' -Action $action -Trigger $trigger `
         -Principal $principal -Settings $settings -Force | Out-Null
+
+    # Start Menu shortcut (launching it while running just brings the window forward)
+    $lnk = Join-Path $env:ProgramData 'Microsoft\Windows\Start Menu\Programs\DiskSentinel.lnk'
+    $sc = (New-Object -ComObject WScript.Shell).CreateShortcut($lnk)
+    $sc.TargetPath = $exe
+    $sc.Arguments = '--show'
+    $sc.WorkingDirectory = $dest
+    $sc.Save()
+
+    if ($ScreenshotDir) {
+        Start-Process $exe -ArgumentList '--screenshot', "`"$ScreenshotDir`"" -Wait
+    }
 
     Write-Host '== 5/5 Hard Disk Sentinel'
     if ($RemoveHardDiskSentinel) {

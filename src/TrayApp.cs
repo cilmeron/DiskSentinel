@@ -1,36 +1,37 @@
 namespace DiskSentinel;
 
-/// <summary>Owns one tray icon per drive and refreshes them on a timer.</summary>
+/// <summary>Owns one tray icon per drive and the main window; refreshes everything on a timer.
+/// The app keeps running in the tray until "Exit" is chosen from a tray icon's menu.</summary>
 public sealed class TrayApp : ApplicationContext
 {
     readonly List<NotifyIcon> _icons = new();
     readonly System.Windows.Forms.Timer _timer = new() { Interval = Settings.RefreshSeconds * 1000 };
     readonly ContextMenuStrip _menu = new();
-    readonly DetailsForm _details = new();
+    readonly HistoryStore _history = new();
+    readonly MainForm _main;
     readonly HashSet<string> _alerted = new();
     List<DiskInfo> _disks = new();
     string _status = "Reading drives...";
     bool _busy;
 
-    public TrayApp()
+    public TrayApp(bool showWindow)
     {
-        _menu.Items.Add("Show details", null, (_, _) => ShowDetails());
+        _main = new MainForm(_history);
+
+        _menu.Items.Add("Open DiskSentinel", null, (_, _) => _main.ShowFromTray());
         _menu.Items.Add("Refresh now", null, async (_, _) => await RefreshAsync());
         _menu.Items.Add(new ToolStripSeparator());
         _menu.Items.Add("Exit", null, (_, _) => ExitThread());
 
+        HistoryStore.Log("DiskSentinel started");
         _timer.Tick += async (_, _) => await RefreshAsync();
         _timer.Start();
         _ = RefreshAsync();
+        if (showWindow) _main.ShowFromTray();
     }
 
-    void ShowDetails()
-    {
-        _details.ShowDisks(_disks, _status);
-        if (!_details.Visible) _details.Show();
-        _details.WindowState = FormWindowState.Normal;
-        _details.Activate();
-    }
+    /// <summary>Called when a second instance is launched: bring the existing window forward.</summary>
+    public void ShowWindow() => _main.BeginInvoke(new Action(_main.ShowFromTray));
 
     async Task RefreshAsync()
     {
@@ -46,9 +47,7 @@ public sealed class TrayApp : ApplicationContext
             else
             {
                 _disks = await Task.Run(SmartService.ReadAll);
-                _status = _disks.Count == 0
-                    ? "No drives found. Run DiskSentinel as administrator."
-                    : "";
+                _status = _disks.Count == 0 ? "No drives found. Run DiskSentinel as administrator." : "";
             }
         }
         catch (Exception ex)
@@ -58,7 +57,9 @@ public sealed class TrayApp : ApplicationContext
         }
         finally { _busy = false; }
 
+        foreach (var d in _disks) _history.Add(d);
         Apply();
+        _main.UpdateDisks(_disks, _status);
     }
 
     void Apply()
@@ -68,7 +69,7 @@ public sealed class TrayApp : ApplicationContext
         while (_icons.Count < wanted)
         {
             var ni = new NotifyIcon { ContextMenuStrip = _menu, Visible = true };
-            ni.MouseClick += (_, e) => { if (e.Button == MouseButtons.Left) ShowDetails(); };
+            ni.MouseClick += (_, e) => { if (e.Button == MouseButtons.Left) _main.ShowFromTray(); };
             _icons.Add(ni);
         }
         while (_icons.Count > wanted)
@@ -87,7 +88,8 @@ public sealed class TrayApp : ApplicationContext
             if (_disks.Count == 0)
             {
                 ni.Icon = TrayIconRenderer.Render(null);
-                ni.Text = ("DiskSentinel: " + _status).Length > 127 ? "DiskSentinel: no data" : "DiskSentinel: " + _status;
+                string text = "DiskSentinel: " + _status;
+                ni.Text = text.Length > 127 ? "DiskSentinel: no data" : text;
             }
             else
             {
@@ -98,20 +100,17 @@ public sealed class TrayApp : ApplicationContext
             }
             old?.Dispose();
         }
-
-        if (_details.Visible) _details.ShowDisks(_disks, _status);
     }
 
     void CheckAlerts(NotifyIcon ni, DiskInfo d)
     {
-        void Alert(string kind, string message)
+        foreach (var p in d.Problems)
         {
-            if (_alerted.Add(d.Serial + kind))
-                ni.ShowBalloonTip(15000, "DiskSentinel", message, ToolTipIcon.Warning);
+            if (!_alerted.Add(d.Serial + p.Kind)) continue;
+            string message = $"{d.Name}: {p.Message}";
+            HistoryStore.Log("ALERT - " + message);
+            ni.ShowBalloonTip(15000, "DiskSentinel", message, ToolTipIcon.Warning);
         }
-        if (d.Health < Settings.HealthWarning) Alert("health", $"{d.Name} health is {d.Health}%. Back up your data.");
-        if (d.Temp >= Settings.TempCritical) Alert("temp", $"{d.Name} is at {d.Temp}°C.");
-        if (d.SmartPassed == false) Alert("smart", $"{d.Name} failed its S.M.A.R.T. self-assessment.");
     }
 
     protected override void Dispose(bool disposing)
@@ -121,7 +120,7 @@ public sealed class TrayApp : ApplicationContext
             _timer.Dispose();
             foreach (var ni in _icons) { ni.Visible = false; ni.Icon?.Dispose(); ni.Dispose(); }
             _menu.Dispose();
-            _details.Dispose();
+            _main.Dispose();
         }
         base.Dispose(disposing);
     }
