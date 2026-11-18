@@ -5,8 +5,11 @@ public static class Settings
     /// <summary>How often drives are re-read.</summary>
     public const int RefreshSeconds = 60;
 
-    /// <summary>A temperature sample is stored in the history at most this often, per drive.</summary>
-    public const int HistoryIntervalSeconds = 300;
+    /// <summary>
+    /// A sample is stored in the history at most this often, per drive. Slightly below
+    /// <see cref="RefreshSeconds"/> so timer jitter never skips a refresh (about 1 MB per drive per month).
+    /// </summary>
+    public const int HistoryIntervalSeconds = 55;
 
     /// <summary>Tray icon turns orange at this temperature (degrees C).</summary>
     public const int TempWarning = 55;
