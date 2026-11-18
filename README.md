@@ -14,9 +14,12 @@ tray icon, inspired by Hard Disk Sentinel's tray display.
   - **Information**: model, serial, firmware, capacity, interface, link speed, TRIM...
   - **Log**: app starts and alerts
 - Works with SATA and NVMe drives, including SATA drives behind a RAID/RST controller
-- Alerts only when something needs action: estimated remaining life under 6 months, failed
-  S.M.A.R.T. self-assessment, pending sectors, media errors, low spare capacity, or critical
-  temperature. A merely worn drive with plenty of life left does not nag you.
+- Alerts only when something needs action: estimated remaining life under 6 months, a failed
+  S.M.A.R.T. self-assessment, or low spare capacity. Problems that can be one-offs only alert
+  when they repeat: pending/reallocated sectors and media errors once they have grown twice
+  (or reached 10), and temperature once it has stayed critical for 3 readings in a row. A
+  single pending sector, or a merely worn drive with plenty of life left, does not nag you.
+- Log, S.M.A.R.T. and Information lists can be copied (Ctrl+C, Ctrl+A, or right-click)
 - Temperature and health history is stored in `%ProgramData%\DiskSentinel`
 - Starts automatically at logon via an elevated scheduled task (no UAC prompt each login)
 

@@ -76,9 +76,41 @@ public sealed class MainForm : Form
 
     static ListView MakeList(params (string Name, int Width)[] cols)
     {
-        var lv = new ListView { Dock = DockStyle.Fill, View = View.Details, FullRowSelect = true, GridLines = true, HideSelection = false };
+        var lv = new ListView
+        {
+            Dock = DockStyle.Fill, View = View.Details, FullRowSelect = true, GridLines = true,
+            HideSelection = false, MultiSelect = true,
+        };
         foreach (var (name, width) in cols) lv.Columns.Add(name, width);
+
+        // Copy support: Ctrl+C, Ctrl+A and a right-click menu (tab-separated, pastes cleanly into Excel).
+        var menu = new ContextMenuStrip();
+        menu.Items.Add("Copy", null, (_, _) => CopyRows(lv, selectedOnly: true));
+        menu.Items.Add("Select all", null, (_, _) => SelectAll(lv));
+        menu.Items.Add("Copy all", null, (_, _) => CopyRows(lv, selectedOnly: false));
+        lv.ContextMenuStrip = menu;
+        lv.KeyDown += (_, e) =>
+        {
+            if (e.Control && e.KeyCode == Keys.C) { CopyRows(lv, selectedOnly: true); e.Handled = true; }
+            else if (e.Control && e.KeyCode == Keys.A) { SelectAll(lv); e.Handled = true; }
+        };
         return lv;
+    }
+
+    static void SelectAll(ListView lv)
+    {
+        foreach (ListViewItem i in lv.Items) i.Selected = true;
+    }
+
+    static void CopyRows(ListView lv, bool selectedOnly)
+    {
+        // Nothing selected means "copy everything".
+        var rows = selectedOnly && lv.SelectedItems.Count > 0
+            ? lv.SelectedItems.Cast<ListViewItem>()
+            : lv.Items.Cast<ListViewItem>();
+        string text = string.Join("\r\n", rows.Select(r =>
+            string.Join("\t", r.SubItems.Cast<ListViewItem.ListViewSubItem>().Select(s => s.Text))));
+        if (text.Length > 0) Clipboard.SetText(text);
     }
 
     TabPage BuildOverview()
@@ -272,28 +304,37 @@ public sealed class MainForm : Form
         }
 
         // S.M.A.R.T.
-        _smart.BeginUpdate();
-        _smart.Items.Clear();
         // NVMe drives have a plain list of counters; SATA drives have ID/value/worst/threshold columns.
         bool plain = d.Attributes.Count > 0 && d.Attributes.All(a => a.Id == "");
         int[] full = { 45, 210, 65, 60, 75, 130, 70 };
         for (int col = 0; col < full.Length; col++)
             _smart.Columns[col].Width = plain ? col switch { 1 => 280, 5 => 180, 6 => 70, _ => 0 } : full[col];
-        foreach (var a in d.Attributes)
+        Fill(_smart, d.Attributes.Select(a =>
         {
             var item = new ListViewItem(new[] { a.Id, a.Name, a.Value, a.Worst, a.Threshold, a.Raw, a.Failed ? "FAILING" : "OK" });
             if (a.Failed) item.BackColor = Red;
-            _smart.Items.Add(item);
-        }
-        _smart.EndUpdate();
+            return item;
+        }));
 
-        // Information
-        _info.Items.Clear();
-        foreach (var (k, v) in d.Info) _info.Items.Add(new ListViewItem(new[] { k, v }));
+        Fill(_info, d.Info.Select(kv => new ListViewItem(new[] { kv.Key, kv.Value })));
+        Fill(_log, HistoryStore.ReadLog().Select(e => new ListViewItem(new[] { e.Time, e.Message })));
+    }
 
-        // Log
-        _log.Items.Clear();
-        foreach (var (time, msg) in HistoryStore.ReadLog()) _log.Items.Add(new ListViewItem(new[] { time, msg }));
+    /// <summary>Replaces a list's rows only if they changed, keeping the user's selection,
+    /// so copying isn't interrupted by the periodic refresh.</summary>
+    static void Fill(ListView lv, IEnumerable<ListViewItem> rows)
+    {
+        var items = rows.ToList();
+        string signature = string.Join("\n", items.Select(i => string.Join("\t", i.SubItems.Cast<ListViewItem.ListViewSubItem>().Select(s => s.Text))));
+        if (lv.Tag as string == signature) return;
+
+        var selected = lv.SelectedIndices.Cast<int>().ToList();
+        lv.BeginUpdate();
+        lv.Items.Clear();
+        lv.Items.AddRange(items.ToArray());
+        foreach (int i in selected) if (i < lv.Items.Count) lv.Items[i].Selected = true;
+        lv.EndUpdate();
+        lv.Tag = signature;
     }
 
     protected override void OnFormClosing(FormClosingEventArgs e)

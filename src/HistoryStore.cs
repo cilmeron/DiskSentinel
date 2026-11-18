@@ -8,6 +8,7 @@ public sealed record Sample(DateTime Time, string Serial, int? Temp, int? Health
 public sealed class HistoryStore
 {
     // DISKSENTINEL_DATA overrides the data folder (used for testing).
+    public static string DataDir => Dir;
     static readonly string Dir = Environment.GetEnvironmentVariable("DISKSENTINEL_DATA") ?? System.IO.Path.Combine(
         Environment.GetFolderPath(Environment.SpecialFolder.CommonApplicationData), "DiskSentinel");
     static readonly string HistoryFile = System.IO.Path.Combine(Dir, "history.csv");

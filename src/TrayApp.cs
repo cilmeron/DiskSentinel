@@ -8,6 +8,7 @@ public sealed class TrayApp : ApplicationContext
     readonly System.Windows.Forms.Timer _timer = new() { Interval = Settings.RefreshSeconds * 1000 };
     readonly ContextMenuStrip _menu = new();
     readonly HistoryStore _history = new();
+    readonly CounterTracker _counters = new();
     readonly MainForm _main;
     readonly HashSet<string> _alerted = new();
     List<DiskInfo> _disks = new();
@@ -57,7 +58,11 @@ public sealed class TrayApp : ApplicationContext
         }
         finally { _busy = false; }
 
-        foreach (var d in _disks) _history.Add(d);
+        foreach (var d in _disks)
+        {
+            _counters.Apply(d);
+            _history.Add(d);
+        }
         Apply();
         _main.UpdateDisks(_disks, _status);
     }

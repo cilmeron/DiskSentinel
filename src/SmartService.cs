@@ -79,23 +79,23 @@ public sealed class DiskInfo
             h -= (int)Math.Min(30, Reallocated.Value);
             Notes.Add($"{Reallocated} reallocated sectors.");
         }
+        // Counters like these are only noted here. They become alerts if they keep growing
+        // (see CounterTracker), so a one-off pending sector does not nag.
         if (Pending is > 0)
         {
             h -= (int)Math.Min(30, Pending.Value);
-            Problems.Add(new("pending", $"{Pending} sectors are pending reallocation (possible failing surface)."));
+            Notes.Add($"{Pending} sector(s) pending reallocation.");
         }
         if (MediaErrors is > 0)
         {
             h -= (int)Math.Min(30, MediaErrors.Value);
-            Problems.Add(new("media", $"{MediaErrors} media/data integrity errors were logged."));
+            Notes.Add($"{MediaErrors} media/data integrity error(s) logged.");
         }
         if (Spare is < 20)
         {
             h = Math.Min(h, 40);
             Problems.Add(new("spare", $"Available spare capacity is down to {Spare}%."));
         }
-        if (Temp >= Settings.TempCritical)
-            Problems.Add(new("temp", $"Temperature is {Temp}{Deg}. Check cooling."));
         if (RemainingDays is double days && days < Settings.RemainingLifeWarningDays)
             Problems.Add(new("life", $"Estimated remaining life is {FormatSpan(days)}. Back up your data and plan to replace this drive."));
 
