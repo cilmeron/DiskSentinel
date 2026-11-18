@@ -72,13 +72,7 @@ try {
     $allReadable = ($readable -ge $expected -and $expected -gt 0)
 
     Write-Host '== 4/5 autostart task'
-    $action = New-ScheduledTaskAction -Execute $exe
-    $trigger = New-ScheduledTaskTrigger -AtLogOn -User $user
-    $principal = New-ScheduledTaskPrincipal -UserId $user -LogonType Interactive -RunLevel Highest
-    $settings = New-ScheduledTaskSettingsSet -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries `
-        -ExecutionTimeLimit ([TimeSpan]::Zero) -StartWhenAvailable
-    Register-ScheduledTask -TaskName 'DiskSentinel' -Action $action -Trigger $trigger `
-        -Principal $principal -Settings $settings -Force | Out-Null
+    & (Join-Path $PSScriptRoot 'register-task.ps1') -ExePath $exe -User $user
 
     # Start Menu shortcut (launching it while running just brings the window forward)
     $lnk = Join-Path $env:ProgramData 'Microsoft\Windows\Start Menu\Programs\DiskSentinel.lnk'

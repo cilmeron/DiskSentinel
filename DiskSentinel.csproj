@@ -9,7 +9,7 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <AssemblyName>DiskSentinel</AssemblyName>
     <RootNamespace>DiskSentinel</RootNamespace>
-    <Version>1.2.0</Version>
+    <Version>1.3.0</Version>
     <!-- Custom controls are built in code (no designer), so designer-serialization warnings do not apply. -->
     <NoWarn>$(NoWarn);WFO1000</NoWarn>
   </PropertyGroup>

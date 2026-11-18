@@ -173,7 +173,12 @@ public static class SmartService
 
     static string? FindSmartctl()
     {
-        var candidates = new List<string>();
+        // A copy bundled by the installer wins over anything else on the machine.
+        var candidates = new List<string>
+        {
+            System.IO.Path.Combine(AppContext.BaseDirectory, "smartctl", "smartctl.exe"),
+            System.IO.Path.Combine(AppContext.BaseDirectory, "smartctl.exe"),
+        };
         foreach (var dir in (Environment.GetEnvironmentVariable("PATH") ?? "").Split(';', StringSplitOptions.RemoveEmptyEntries))
             candidates.Add(System.IO.Path.Combine(dir.Trim(), "smartctl.exe"));
         candidates.Add(@"C:\Program Files\smartmontools\bin\smartctl.exe");

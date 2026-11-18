@@ -27,17 +27,34 @@ Drive data comes from [smartmontools](https://www.smartmontools.org/) (`smartctl
 
 ## Requirements
 
-- Windows 10/11
-- [.NET 10 SDK](https://dotnet.microsoft.com/download) to build
-- smartmontools (the installer adds it with winget if missing)
+- Windows 10/11 (64-bit)
+- Nothing else to run it: the installer includes the .NET runtime and smartctl
+- To build from source: the [.NET 10 SDK](https://dotnet.microsoft.com/download),
+  smartmontools and [Inno Setup 6](https://jrsoftware.org/isinfo.php) (for the installer)
 
 ## Install
 
-**From a release:** download the zip from the
-[Releases](https://github.com/cilmeron/DiskSentinel/releases) page, extract it, and run
-`scripts\install.ps1` (needs the [.NET 10 Desktop Runtime](https://dotnet.microsoft.com/download/dotnet/10.0)).
+**Recommended: the installer.** Download `DiskSentinel-Setup-<version>.exe` from the
+[Releases](https://github.com/cilmeron/DiskSentinel/releases) page and run it. The wizard:
 
-**From source**, in a PowerShell prompt in the repo:
+1. runs a **system check** (Windows version, administrator rights, that the bundled
+   smartctl starts, and which drives it can see) and tells you plainly if something is wrong;
+2. lets you choose: start at sign-in (recommended), a desktop shortcut, and optionally
+   **remove Hard Disk Sentinel**;
+3. after installing, runs a **self-test** to confirm the app can read your drives, and warns
+   if it can't. Hard Disk Sentinel is only removed if every drive was readable.
+
+Silent install for scripts: `DiskSentinel-Setup-<version>.exe /VERYSILENT /TASKS=autostart`
+(add `,removehds` to the tasks to also remove Hard Disk Sentinel).
+The installer is unsigned, so Windows SmartScreen may show a warning the first time.
+
+**Build the installer yourself:**
+
+```powershell
+.\installer\build.ps1      # -> installer\Output\DiskSentinel-Setup-<version>.exe
+```
+
+**Without the installer, from source**, in a PowerShell prompt in the repo:
 
 ```powershell
 .\scripts\install.ps1
@@ -55,7 +72,11 @@ To replace Hard Disk Sentinel at the same time:
 
 Hard Disk Sentinel is only removed if DiskSentinel was able to read every drive in the PC.
 
-To uninstall: `.\scripts\uninstall.ps1`
+To uninstall: use Windows' *Installed apps* (or `.\scripts\uninstall.ps1` for the script
+install). The installer's uninstaller offers to delete the saved history too.
+
+smartctl is part of [smartmontools](https://www.smartmontools.org/) (GPL v2+), bundled
+unmodified; its licence is shown in the installer and installed in `smartctl\COPYING.txt`.
 
 ## Run from source
 
