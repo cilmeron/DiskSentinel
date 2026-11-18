@@ -30,7 +30,11 @@ Drive data comes from [smartmontools](https://www.smartmontools.org/) (`smartctl
 
 ## Install
 
-From a PowerShell prompt in the repo:
+**From a release:** download the zip from the
+[Releases](https://github.com/cilmeron/DiskSentinel/releases) page, extract it, and run
+`scripts\install.ps1` (needs the [.NET 10 Desktop Runtime](https://dotnet.microsoft.com/download/dotnet/10.0)).
+
+**From source**, in a PowerShell prompt in the repo:
 
 ```powershell
 .\scripts\install.ps1

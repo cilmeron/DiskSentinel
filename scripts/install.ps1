@@ -52,8 +52,14 @@ try {
     Write-Host '== 2/5 build and install'
     Get-Process DiskSentinel -ErrorAction SilentlyContinue | Stop-Process -Force
     Start-Sleep -Milliseconds 500
-    dotnet publish "$projectDir\DiskSentinel.csproj" -c Release -o $dest --self-contained false
-    if ($LASTEXITCODE -ne 0) { throw 'dotnet publish failed' }
+    if (Test-Path "$projectDir\DiskSentinel.dll") {
+        # Release zip layout: prebuilt files sit next to the scripts folder (needs the .NET 10 Desktop Runtime).
+        New-Item -ItemType Directory -Force $dest | Out-Null
+        Get-ChildItem $projectDir -Exclude scripts, README.md, LICENSE | Copy-Item -Destination $dest -Recurse -Force
+    } else {
+        dotnet publish "$projectDir\DiskSentinel.csproj" -c Release -o $dest --self-contained false
+        if ($LASTEXITCODE -ne 0) { throw 'dotnet publish failed' }
+    }
 
     Write-Host '== 3/5 smoke test (can every drive be read?)'
     $dump = Join-Path $env:TEMP 'disksentinel-smoke.txt'
